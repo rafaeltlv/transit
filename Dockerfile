@@ -1,14 +1,42 @@
-# Use a specific version of the Rust image as a base
-FROM rust:1.72
+# Use Ubuntu 22.04 as the base image
+FROM ubuntu:22.04 AS base
 
-# Set the working directory inside the container
-WORKDIR /usr/src/app
+# Update and install necessary dependencies
+RUN apt update && apt upgrade -y
 
-# Copy the current directory contents into the container
+# Install curl (useful for installing Rust and Node.js)
+RUN apt install -y curl build-essential
+
+# Install Rust
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+ENV PATH="/root/.cargo/bin:${PATH}"
+
+# Install Node.js for Svelte
+RUN curl -sL https://deb.nodesource.com/setup_16.x | bash -
+RUN apt install -y nodejs
+
+# Build the Svelte frontend
+FROM base AS svelte-builder
+WORKDIR /app/svelte-app
+COPY svelte-app/package.json ./
+RUN npm install
+COPY svelte-app/ ./
+RUN npm run build
+
+# Build the Rust backend
+FROM base AS rust-builder
+WORKDIR /app
 COPY . .
-
-# Build the Rust application
+COPY --from=svelte-builder /app/svelte-app/public /app/public
 RUN cargo build --release
 
-# Set the command to run your application (replace with your actual application command)
-CMD ["./target/release/transit"]
+# Final image with Nginx (if you need it)
+FROM base
+WORKDIR /app
+COPY --from=rust-builder /app/target/release/transit /app/
+COPY --from=svelte-builder /app/svelte-app/public /app/public
+
+# If you need Nginx and PHP, add their setup here as described in the tutorial
+
+EXPOSE 8080
+CMD ["./transit"]  # Change this to the name of your Rust binary
