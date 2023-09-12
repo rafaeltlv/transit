@@ -1,42 +1,65 @@
-# Use Ubuntu 22.04 as the base image
-FROM ubuntu:22.04 AS base
+# Multi-stage Dockerfile to build both frontend and backend
 
-# Update and install necessary dependencies
-RUN apt update && apt upgrade -y
+# ================== FRONTEND BUILD STAGE ================== #
+FROM node:20 AS svelte-builder
 
-# Install curl (useful for installing Rust and Node.js)
-RUN apt install -y curl build-essential
+WORKDIR /svelte-app/ ./
 
-# Install Rust
-RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
-ENV PATH="/root/.cargo/bin:${PATH}"
-
-# Install Node.js for Svelte
-RUN curl -sL https://deb.nodesource.com/setup_16.x | bash -
-RUN apt install -y nodejs
-
-# Build the Svelte frontend
-FROM base AS svelte-builder
-WORKDIR /app/svelte-app
-COPY svelte-app/package.json ./
+# Copy package.json and package-lock.json first for efficient caching
+COPY package.json .
 RUN npm install
-COPY svelte-app/ ./
+
+# Copy the rest of the frontend files
+COPY . .
+
+# Build the frontend
 RUN npm run build
 
-# Build the Rust backend
-FROM base AS rust-builder
-WORKDIR /app
+# ================== BACKEND BUILD STAGE ================== #
+FROM rust:1.72.0 AS rust-builder
+
+WORKDIR /backend
+
+# Copy Rust files and build the Rust application
 COPY . .
-COPY --from=svelte-builder /app/svelte-app/public /app/public
 RUN cargo build --release
 
-# Final image with Nginx (if you need it)
-FROM base
+# ================== FINAL STAGE ================== #
+FROM ubuntu:22.04
+
+# Environment variables
+ENV RUST_VERSION=1.72.0
+ENV NODE_VERSION=20
+
+# Update and install necessary dependencies
+RUN apt update && apt upgrade -y && \
+    apt install -y curl build-essential ca-certificates gnupg && \
+    curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg && \
+    echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_${NODE_VERSION}.x nodistro main" | tee /etc/apt/sources.list.d/nodesource.list && \
+    apt-get update && \
+    apt-get install -y nodejs && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
-COPY --from=rust-builder /app/target/release/transit /app/
-COPY --from=svelte-builder /app/svelte-app/public /app/public
 
-# If you need Nginx and PHP, add their setup here as described in the tutorial
+# Create a new user for our application
+RUN useradd appuser
 
+# Copy the frontend build
+COPY --from=svelte-builder /frontend/public /app/public
+
+# Copy the Rust binary
+COPY --from=rust-builder /backend/target/release/transit /app/
+
+# Switch to the app user
+USER appuser
+
+# Expose the port that our application will run on
 EXPOSE 8080
-CMD ["./transit"]  # Change this to the name of your Rust binary
+
+# Health check to ensure our service is running
+HEALTHCHECK CMD curl --fail http://localhost:8080/ || exit 1
+
+# Command to run our application
+CMD ["./transit"]
