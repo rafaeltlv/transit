@@ -3,14 +3,14 @@
 # ================== FRONTEND BUILD STAGE ================== #
 FROM node:20 AS svelte-builder
 
-WORKDIR /svelte-app/ ./
+WORKDIR /app/frontend
 
-# Copy package.json and package-lock.json first for efficient caching
-COPY package.json .
+# Copy frontend package.json and package-lock.json first for efficient caching
+COPY svelte-app/package.json svelte-app/package-lock.json ./
 RUN npm install
 
 # Copy the rest of the frontend files
-COPY . .
+COPY svelte-app/ ./
 
 # Build the frontend
 RUN npm run build
@@ -18,20 +18,21 @@ RUN npm run build
 # ================== BACKEND BUILD STAGE ================== #
 FROM rust:1.72.0 AS rust-builder
 
-WORKDIR /backend
+WORKDIR /app/backend
 
-# Copy Rust files and build the Rust application
-COPY . .
+# Copy only Rust files and Cargo.toml for the backend
+COPY Cargo.toml Cargo.lock ./
+COPY src ./src
 RUN cargo build --release
 
 # ================== FINAL STAGE ================== #
-FROM ubuntu:22.04
+FROM ubuntu:23.04
 
 # Environment variables
 ENV RUST_VERSION=1.72.0
 ENV NODE_VERSION=20
 
-# Update and install necessary dependencies
+# Install necessary dependencies
 RUN apt update && apt upgrade -y && \
     apt install -y curl build-essential ca-certificates gnupg && \
     curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg && \
@@ -43,23 +44,23 @@ RUN apt update && apt upgrade -y && \
 
 WORKDIR /app
 
-# Create a new user for our application
+# Create a new user for the application
 RUN useradd appuser
 
 # Copy the frontend build
-COPY --from=svelte-builder /frontend/public /app/public
+COPY --from=svelte-builder /app/frontend/public /app/public
 
 # Copy the Rust binary
-COPY --from=rust-builder /backend/target/release/transit /app/
+COPY --from=rust-builder /app/backend/target/release/transit /app/
 
 # Switch to the app user
 USER appuser
 
-# Expose the port that our application will run on
+# Expose the port
 EXPOSE 8080
 
-# Health check to ensure our service is running
+# Health check
 HEALTHCHECK CMD curl --fail http://localhost:8080/ || exit 1
 
-# Command to run our application
+# Command to run the application
 CMD ["./transit"]

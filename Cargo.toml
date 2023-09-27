@@ -10,5 +10,3 @@ actix-web = "4.4.0"
 diesel = { version = "2.1.1", features = ["postgres", "r2d2", "chrono", "uuid"] }
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
-authors = ["Rafael <your.email@example.com>"]
